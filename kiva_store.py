@@ -5,6 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy import Table, Column
 from sqlalchemy import Integer, String, MetaData, Date, Boolean, Float
 from requests_oauthlib import OAuth1
+import sys
 
 
 def get_loan_record(loan, filename_index):
@@ -64,7 +65,8 @@ def get_loan_record(loan, filename_index):
             'terms_repayment_term': terms.get('repayment_term', None),
             'journal_totals_entries': journal_totals.get('entries', 0),
             'payments': payments,
-            'file_index': filename_index}
+            'file_index': filename_index,
+            'borrowers': loan.get('borrowers', None)}
 
 
 def kiva_api(api_url):
@@ -81,31 +83,69 @@ def kiva_api(api_url):
     return response
 
 
-def process_file_loans(filename_index, conn, loan_table):
+def process_file_loans(filename_index, conn, loan_table, loan_lender_table, loan_borrower_table):
     filename = 'kiva_ds_json/loans_lenders/' + str(filename_index) + '.json'
     with open(filename) as data_file:
         data = json.load(data_file)
         file_loans = data['loans_lenders']
 
-        # batch call in groups of 5
+        # 1000 loans in a file, batch call in groups of 10
         for batch_index, batch_loans in enumerate(
-                np.array_split(file_loans, 200)):
+                np.array_split(file_loans, 100)):
             batch_loan_ids = [str(loan['id']) for loan in batch_loans]
             loan_ids_str = ','.join(batch_loan_ids)
             api_url = 'https://api.kivaws.org/v1/loans/' + loan_ids_str + '.json'
             print(batch_index, ': ', api_url)
             response = kiva_api(api_url)
-            loans_obj = json.loads(response)['loans']
 
-            loan_records = []
-            for curr_loan in loans_obj:
-                loan_id = curr_loan['id']
-                if loan_id:
-                    loan_rec = get_loan_record(curr_loan, filename_index)
-                    if (loan_rec['payments']):
-                        print('payments:', loan_rec['payments'])
-                    loan_records.append(loan_rec)
-            conn.execute(loan_table.insert(), loan_records)
+            try:
+                loans_obj = json.loads(response)['loans']
+
+                loan_records = []
+                loan_lender_records = []
+                loan_borrowers = []
+
+                # process kiva API loan response
+                for curr_loan in loans_obj:
+                    loan_id = curr_loan['id']
+                    if loan_id:
+                        # get loan record
+                        loan_rec = get_loan_record(curr_loan, filename_index)
+                        borrowers = loan_rec.get('borrowers', None)
+
+                        if borrowers:
+                            for loan_borrower in borrowers:
+                                loan_borrower.update({
+                                    'file_index': filename_index,
+                                    'loan_id': loan_id})
+                                loan_borrowers.append(loan_borrower)
+
+                        loan_records.append(loan_rec)
+
+                # get lenders for loans from file
+                for file_loan in batch_loans:
+                    loan_id = file_loan['id']
+                    lenders = file_loan.get('lender_ids', None)
+                    if lenders:
+                        loan_lender_records = loan_lender_records + \
+                            [{'lender_id': lender_id, 'loan_id': loan_id, 'file_index': filename_index}
+                             for lender_id in lenders]
+
+                if loan_lender_records:
+                    conn.execute(loan_lender_table.insert(),
+                                 loan_lender_records)
+                if loan_records:
+                    conn.execute(loan_table.insert(), loan_records)
+
+                if loan_borrowers:
+                    conn.execute(loan_borrower_table.insert(),
+                                 loan_borrowers)
+
+            except:
+                e = sys.exc_info()[0]
+                print('Error, skipping batch')
+                print(e)
+
         return loan_records
 
 
@@ -151,9 +191,25 @@ def main():
 
     loan_lender_table = Table('loan_lender', metadata,
                               Column('loan_id', Integer),
-                              Column('lender_id', String))
+                              Column('lender_id', String),
+                              Column('file_index', Integer))
 
-    process_file_loans(1, conn, loan_table)
+    loan_borrower_table = Table('loan_borrower', metadata,
+                                Column('loan_id', Integer),
+                                Column('first_name', String),
+                                Column('last_name', String),
+                                Column('pictured', Boolean),
+                                Column('gender', String),
+                                Column('file_index', Integer))
+
+    for file_index in range(10, 150):
+        print('-- File ', file_index)
+        process_file_loans(file_index, conn, loan_table,
+                           loan_lender_table, loan_borrower_table)
+
+
 # Standard boilerplate to call the main() function.
 if __name__ == '__main__':
+    # python kiva_store.py > kiva.log 2>&1 &
     main()
+# 1015

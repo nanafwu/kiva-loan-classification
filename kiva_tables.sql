@@ -5,11 +5,47 @@ FROM loan
 GROUP BY status
 
 
-SELECT date_trunc('month', posted_date) AS max_posted_date, count(*)
+SELECT date_trunc('month', posted_date) AS max_posted_date, status, count(*)
 FROM loan
-GROUP BY max_posted_date
+WHERE status IN ('expired', 'funded')
+GROUP BY max_posted_date, status
 ORDER BY max_posted_date;
 
+SELECT sector, count(1) AS count
+FROM loan
+GROUP BY sector
+ORDER BY count DESC;
+
+
+-- Look at funding rate by country
+SELECT location_country, expired, funded,
+       expired::FLOAT / ((expired::FLOAT) + (funded::FLOAT)) AS expiration_rate,
+       funded::FLOAT / ((expired::FLOAT) + (funded::FLOAT)) AS funding_rate
+FROM (
+   SELECT * FROM crosstab (
+       'SELECT location_country, status, count(1) AS count
+        FROM loan
+        GROUP BY location_country, status'
+
+      ,$$VALUES ('expired'::text), ('funded'::text)$$)
+   AS ct ("location_country" text, "expired" int, "funded" text)
+) c
+WHERE
+  expired IS NOT NULL
+  AND funded IS NOT NULL
+  AND expired >= 100
+ORDER BY expiration_rate DESC
+
+SELECT activity, count(1) AS count
+FROM loan
+GROUP BY activity
+ORDER BY count DESC;
+
+SELECT p.id, count(*)
+FROM loan l
+LEFT OUTER JOIN partner p ON l.partner_id = p.id
+GROUP BY p.id
+HAVING count(*) = 1
 
 SELECT file_index, max(date_trunc('month', posted_date)) AS max_posted_date, min(date_trunc('month', posted_date)) AS min_posted_date, count(*)
 FROM loan
@@ -17,35 +53,8 @@ GROUP BY file_index
 ORDER BY max_posted_date;
 
 -- Create Views
- funded_date                            | timestamp without time zone |
- status                                 | character varying(100)      |
- planned_expiration_date                | timestamp without time zone |
- posted_date                            | timestamp without time zone |
- sector                                 | character varying(100)      |
- activity                               | character varying(1000)     |
- loan_amount                            | integer                     |
- lender_count                           | integer                     |
- location_country_code                  | character varying(10)       |
- location_country                       | character varying(100)      |
- location_town                          | character varying(1000)     |
- location_geo_level                     | character varying(100)      |
- location_geo_type                      | character varying(100)      |
- location_geo_lat                       | numeric                     |
- location_geo_long                      | numeric                     |
- partner_id                             | integer                     |
- bonus_credit_eligibility               | boolean                     |
- description_en                         | text                        |
- use_text                               | text                        |
- tag_text                               | text                        |
- terms_disbursal_amount                 | integer                     |
- terms_disbursal_currency               | character varying(10)       |
- terms_disbursal_date                   | timestamp without time zone |
- terms_loan_amount                      | integer                     |
- terms_loss_liability_currency_exchange | character varying(20)       |
- terms_loss_liability_nonpayment        | character varying(20)       |
- terms_repayment_term                   | smallint                    |
- journal_totals_entries                 | smallint                    |
 
+CREATE VIEW loan_view AS
 SELECT
  l.id, l.name, l.funded_amount, l.funded_date, l.status, l.planned_expiration_date,
  l.posted_date, l.sector, l.activity, l.loan_amount, l.lender_count,
@@ -55,15 +64,28 @@ SELECT
  l.use_text, l.tag_text,
  l.terms_disbursal_amount, l.terms_disbursal_currency,
  l.terms_disbursal_date, l.terms_loan_amount, l.terms_loss_liability_nonpayment,
+ l.terms_repayment_term, l.journal_totals_entries,
+ b.borrower_count, b.m_borrower_count, b.f_borrower_count, b.pic_borrower_count,
  p.name AS partner_name, p.status AS partner_status, p.rating AS partner_rating,
- p.delinquency_rate AS partner_delinquency_rate, p.default_rate AS partner_rate,
+ p.delinquency_rate AS partner_delinquency_rate, p.default_rate AS partner_default_rate,
  p.total_amount_raised AS partner_total_amount_raised, p.loans_posted AS partner_loans_posted,
  p.charges_fees_and_interest AS partner_charges_fees_and_interest,
  p.average_loan_size_percent_per_capita_income AS partner_average_loan_size_percent_per_capita_income,
  p.loans_at_risk_rate AS partner_loans_at_risk_rate
 FROM loan l
 LEFT OUTER JOIN partner p ON l.partner_id = p.id
-LIMIT 10
+LEFT OUTER JOIN (
+     SELECT loan_id,
+       sum(case when loan_id IS NOT NULL then 1 else 0 end) as borrower_count,
+       sum(case when gender  = 'M' then 1 else 0 end) as m_borrower_count,
+       sum(case when gender  = 'F' then 1 else 0 end) as f_borrower_count,
+       sum(case when pictured IS TRUE then 1 else 0 end) as pic_borrower_count
+     FROM loan_borrower
+     GROUP BY loan_id
+) b ON b.loan_id = l.id
+WHERE l.status IN ('expired', 'funded');
+
+
 
 -- CREATE Tables
 

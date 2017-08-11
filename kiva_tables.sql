@@ -36,6 +36,24 @@ WHERE
   AND expired >= 100
 ORDER BY expiration_rate DESC
 
+-- Look at funding rate by sector
+SELECT sector, expired, funded,
+       expired::FLOAT / ((expired::FLOAT) + (funded::FLOAT)) AS expiration_rate,
+       funded::FLOAT / ((expired::FLOAT) + (funded::FLOAT)) AS funding_rate
+FROM (
+   SELECT * FROM crosstab (
+       'SELECT sector, status, count(1) AS count
+        FROM loan
+        GROUP BY sector, status'
+
+      ,$$VALUES ('expired'::text), ('funded'::text)$$)
+   AS ct ("sector" text, "expired" int, "funded" text)
+) c
+WHERE
+  expired IS NOT NULL
+  AND funded IS NOT NULL
+ORDER BY expiration_rate DESC
+
 SELECT activity, count(1) AS count
 FROM loan
 GROUP BY activity

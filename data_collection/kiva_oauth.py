@@ -1,11 +1,19 @@
 import time
-# import urllib2
 import json
 import oauth2 as oauth
+import cnfg
 
-# You need to set these
-consumer_key = 'metis.kiva.classification'
-consumer_secret = 'zQVsSpUhutvCxz-U-hOEYjgHRCELG-UC'
+"""
+Run this script one time to get
+`resource_owner_key` and `resource_owner_secret` to use
+Kiva API
+"""
+
+config_kiva = cnfg.load(".metis_config")['kiva_api']
+
+# Get consumer_key and consumer_secret from Kiva Developers Site
+consumer_key = config_kiva['consumer_key']
+consumer_secret = config_kiva['consumer_secret']
 
 # If you have set up a callback URL at build.kiva.org, you should enter it
 # below. Otherwise leave it as 'oob'
@@ -39,11 +47,6 @@ request_token = dict(json.loads(str(content)))
 
 print ('Request Token: ', str(content))
 
-# print "Request Token:"
-# print "    - oauth_token        = %s" % request_token['oauth_token']
-# print "    - oauth_token_secret = %s" % request_token['oauth_token_secret']
-# print
-
 # Step 2: Redirect to the provider. Since this is a CLI script we do not
 # redirect. In a web application you would redirect the user to the URL
 # below.
@@ -60,6 +63,7 @@ oauth_verifier = input('Enter the code here: ')
 # request token to sign this request. After this is done you throw away the
 # request token and use the access token returned. You should store this
 # access token somewhere safe, like a database, for future use.
+
 token = oauth.Token(request_token['oauth_token'], request_token[
     'oauth_token_secret'])
 token.set_verifier(oauth_verifier)
@@ -79,14 +83,6 @@ if resp['status'] != '200':
 access_oauth_token = input('Enter the access oauth token here: ')  # in token
 access_oauth_token_secret = input('Enter the access oauth token secret here: ')
 
-# print "Access Token:"
-# print "    - oauth_token        = %s" % access_token['oauth_token']
-# print "    - oauth_token_secret = %s" % access_token['oauth_token_secret']
-# print
-# print "You may now access protected resources using the access tokens above."
-# print
-# print "ACCESSING RESOURCE"
-# print
 
 # Set the base oauth_* parameters along with any other parameters required
 # for the API call.
@@ -99,7 +95,7 @@ params = {
 # Set our token/key parameters
 token = oauth.Token(access_oauth_token,
                     access_oauth_token_secret)
-params['oauth_token'] = access_oauth_token  # access_token['oauth_token']
+params['oauth_token'] = access_oauth_token
 params['oauth_consumer_key'] = consumer.key
 
 # Create our request. Change method, etc. accordingly.
@@ -118,13 +114,3 @@ if resp['status'] != '200':
                     resp['status'] + " Message: " + content)
 
 print (content)
-
-"""
-{"oauth_token":"7WwN8yMkNnlvNAz70LBKgdyEnjx47NLH;metis.kiva.classification","oauth_token_secret":"5-yDKT1hYVebDU.hdq6q3gdrZh1Npw3L","oauth_callback_confirmed":"true"}
-
-https://www.kiva.org/oauth/authorize?response_type=code&oauth_callback=oob&client_id=metis.kiva.classification&scope=access&oauth_token=7WwN8yMkNnlvNAz70LBKgdyEnjx47NLH;metis.kiva.classification
-Enter the code here: XTXJJP
-
-Access Token Url:  https://api.kivaws.org/oauth/access_token
-ACCESS TOKEN:  oauth_token=DSURA0YTUR0UWU8SDDAHM%3Bmetis.kiva.classification&oauth_token_secret=9Cp-VB.PqvVagGmwnsZCww9Jrc7DAjT7&scope=access
-"""

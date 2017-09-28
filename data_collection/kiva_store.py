@@ -6,6 +6,7 @@ from sqlalchemy import Table, Column
 from sqlalchemy import Integer, String, MetaData, Date, Boolean, Float
 from requests_oauthlib import OAuth1
 import sys
+import cnfg
 
 
 def get_loan_record(loan, filename_index):
@@ -38,7 +39,8 @@ def get_loan_record(loan, filename_index):
             'funded_amount': loan.get('funded_amount', None),
             'funded_date': loan.get('funded_date', None),
             'status': loan.get('status', None),
-            'planned_expiration_date': loan.get('planned_expiration_date', None),
+            'planned_expiration_date': loan.get('planned_expiration_date',
+                                                None),
             'posted_date': loan.get('posted_date', None),
             'sector': loan.get('sector', None),
             'activity': loan.get('activity', None),
@@ -52,7 +54,8 @@ def get_loan_record(loan, filename_index):
             'location_geo_lat': location_geo_lat,
             'location_geo_long': location_geo_long,
             'partner_id': loan.get('partner_id', None),
-            'bonus_credit_eligibility': loan.get('bonus_credit_eligibility', None),
+            'bonus_credit_eligibility': loan.get('bonus_credit_eligibility',
+                                                 None),
             'description_en':  texts_tag.get('en', None),
             'use_text': loan.get('use', None),
             'tag_text': ' '.join([t['name'] for t in tags]),
@@ -60,8 +63,10 @@ def get_loan_record(loan, filename_index):
             'terms_disbursal_currency': terms.get('disbursal_currency', None),
             'terms_disbursal_date': terms.get('disbursal_date', None),
             'terms_loan_amount': terms.get('loan_amount', None),
-            'terms_loss_liability_currency_exchange': loss_liability.get('currency_exchange', None),
-            'terms_loss_liability_nonpayment': loss_liability.get('nonpayment', None),
+            'terms_loss_liability_currency_exchange':
+            loss_liability.get('currency_exchange', None),
+            'terms_loss_liability_nonpayment':
+            loss_liability.get('nonpayment', None),
             'terms_repayment_term': terms.get('repayment_term', None),
             'journal_totals_entries': journal_totals.get('entries', 0),
             'payments': payments,
@@ -70,10 +75,11 @@ def get_loan_record(loan, filename_index):
 
 
 def kiva_api(api_url):
-    consumer_key = 'metis.kiva.classification'
-    consumer_secret = 'zQVsSpUhutvCxz-U-hOEYjgHRCELG-UC'
-    resource_owner_key = 'DSURA0YTUR0UWU8SDDAHM;metis.kiva.classification'
-    resource_owner_secret = '9Cp-VB.PqvVagGmwnsZCww9Jrc7DAjT7'
+    config_kiva = cnfg.load(".metis_config")['kiva_api']
+    consumer_key = config_kiva['consumer_key']
+    consumer_secret = config_kiva['consumer_secret']
+    resource_owner_key = config_kiva['resource_owner_key']
+    resource_owner_secret = config_kiva['resource_owner_secret']
     oauth = OAuth1(consumer_key,
                    client_secret=consumer_secret,
                    resource_owner_key=resource_owner_key,
@@ -83,7 +89,12 @@ def kiva_api(api_url):
     return response
 
 
-def process_file_loans(filename_index, conn, loan_table, loan_lender_table, loan_borrower_table):
+def process_file_loans(filename_index, conn, loan_table,
+                       loan_lender_table, loan_borrower_table):
+    """
+    Assumes Kiva snapshots stored under directory `kiva_ds_json`:
+    For every loan and lender, get detailed information from Kiva API
+    """
     filename = 'kiva_ds_json/loans_lenders/' + str(filename_index) + '.json'
     with open(filename) as data_file:
         data = json.load(data_file)
@@ -128,7 +139,8 @@ def process_file_loans(filename_index, conn, loan_table, loan_lender_table, loan
                     lenders = file_loan.get('lender_ids', None)
                     if lenders:
                         loan_lender_records = loan_lender_records + \
-                            [{'lender_id': lender_id, 'loan_id': loan_id, 'file_index': filename_index}
+                            [{'lender_id': lender_id, 'loan_id': loan_id,
+                              'file_index': filename_index}
                              for lender_id in lenders]
 
                 if loan_lender_records:
@@ -150,10 +162,20 @@ def process_file_loans(filename_index, conn, loan_table, loan_lender_table, loan
 
 
 def main():
-    engine = create_engine(
-        'postgresql://ubuntu:ubuntu@ec2-13-59-36-9.us-east-2.compute.amazonaws.com:5432/ubuntu')
+    """
+    Store kiva loan, lender, and borrower data into
+    `loan`, `loan_lender`, `loan_borrower` tables in database
+    """
+    config = cnfg.load(".metis_config")
+    engine = create_engine('postgresql://{}:{}@{}:5432/{}'.format(
+        config['db_user'],
+        config['db_pwd'],
+        config['db_host'],
+        'ubuntu'))
+
     conn = engine.connect()
     metadata = MetaData()
+
     loan_table = Table('loan', metadata,
                        Column('id', Integer, primary_key=True),
                        Column('name', String),
@@ -182,7 +204,8 @@ def main():
                        Column('terms_disbursal_currency', String),
                        Column('terms_disbursal_date', Date),
                        Column('terms_loan_amount', Integer),
-                       Column('terms_loss_liability_currency_exchange', String),
+                       Column('terms_loss_liability_currency_exchange',
+                              String),
                        Column('terms_loss_liability_nonpayment', String),
                        Column('terms_repayment_term', Integer),
                        Column('journal_totals_entries', Integer),
@@ -202,14 +225,12 @@ def main():
                                 Column('gender', String),
                                 Column('file_index', Integer))
 
+    # Process files in `kiva_ds_json` directory
     for file_index in range(10, 150):
         print('-- File ', file_index)
         process_file_loans(file_index, conn, loan_table,
                            loan_lender_table, loan_borrower_table)
 
 
-# Standard boilerplate to call the main() function.
 if __name__ == '__main__':
-    # python kiva_store.py > kiva.log 2>&1 &
     main()
-# 1015
